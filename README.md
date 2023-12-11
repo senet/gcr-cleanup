@@ -13,6 +13,7 @@ GCR currently lacks a built-in feature for container image lifecycle management,
 
 #### Arguments:
 `<PROJECT_NAME>`: Your Google Cloud project ID.
+
 `<RETENTION_DAYS>`: The number of days to retain images. Images older than this threshold will be deleted.
 
 Example: `./gcr-cleanup.sh my-project 30`
