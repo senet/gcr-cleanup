@@ -1,76 +1,59 @@
 #!/bin/bash
 
-# Function to retrieve and filter image list
-get_images() {
-  local filter="$1"
-  gcloud container images list --repository gcr.io/$project $filter | grep -v NAME | cut -d ' ' -f 1
-}
 
-# Function to delete image and its tags
-delete_image() {
-  local image="$1"
-  local digest="$2"
-
-  echo "Deleting image: $image@sha256:$digest"
-  gcloud container images untag "$image" --quiet
-  gcloud container images delete "$image@sha256:$digest" --quiet
-}
-
-# Function to process image tags
-process_tags() {
-  local image="$1"
-  local retention_period="$2"
-
-  local image_tags=$(gcloud container images list-tags "$image" --format="get(tags)")
-
-  for tag in $image_tags; do
-    local timestamp=$(gcloud container images list-tags "$image:$tag" --format="get(timestamp.day)")
-
-    local timestamp_epoch=$(date -d "$timestamp days ago" +%s)
-
-    if ((timestamp_epoch < retention_period)); then
-      echo "Deleting tag: $image:$tag"
-      gcloud container images untag "$image:$tag" --quiet
-    else
-      echo "Image tag: $image:$tag is newer than $retention_period days. Skipping deletion."
-    fi
-  done
-}
-
-# Script parameters
+# Variable initialization
 project="$1"
 retention_period="$2"
-dev_retention_period="${3:-}"
-dev_tag_pattern="${4:-}"
 
-# Get all images
-images=$(get_images)
+# Retrieving image list and timestamps
+images=`gcloud container images list --repository gcr.io/"$project" | grep -v NAME`
+cutoff_date=$(date -d "$retention_peiriod days ago" +%s)
+time_now=`date +%s`
 
-# Cleanup untagged images older than a day
-untagged_images=$(get_images "-tags:*")
-for image in $untagged_images; do
-  delete_image "$image" "$(gcloud container images list-tags "$image" --format="get(digest)")"
-done
+# Temporary directory for log files
+folderPath="/tmp/gcrCleanup_${time_now}"
+mkdir -p "$folderPath"
 
-# Process remaining images
-for image in $images; do
-  echo "Processing image: $image"
+# Processing images
+for image in $images;
+do
+    echo "Processing ${image}"
+    fileName=`echo $image | rev | cut -d '/' -f1 | rev`
+    filePath="${folderPath}/${fileName}.txt"
+    touch "$filePath"
 
-  process_tags "$image" "$retention_period"
-
-  if [[ -n "$dev_retention_period" && -n "$dev_tag_pattern" ]]; then
-    # Process Dev build images
-    dev_build_tags=$(gcloud container images list-tags "$image" --filter="$dev_tag_pattern" --format="get(tags)")
-    for tag in $dev_build_tags; do
-      local timestamp=$(gcloud container images list-tags "$image:$tag" --format="get(timestamp.day)")
-      local timestamp_epoch=$(date -d "$timestamp days ago" +%s)
-
-      if ((timestamp_epoch < dev_retention_period)); then
-        echo "Deleting Dev build tag: $image:$tag"
-        delete_image "$image" "$(gcloud container images list-tags "$image:$tag" --format="get(digest)")"
-      fi
+    # Clean untagged images older than a day
+    echo "Deleting untagged images, if any"
+    images_withoutTag=`gcloud container images list-tags "$image" --filter='-tags:*' --format="get(digest, timestamp.day)" | awk 'IF $2 > 1 {print $1}'`
+    for image_withoutTag in $images_withoutTag;
+    do
+      echo "Deleting ${image}@${image_withoutTag}"
+      gcloud container images delete "${image}@${image_withoutTag}" --quiet
     done
-  fi
-done
 
-echo "Cleanup completed!"
+    # List and process image tags
+    echo "rertieving list of ${image} tags"
+    gcloud container images list-tags "$image" >> $filePath
+    {
+      read
+      while IFS=' ' read -r DIGEST TAGS TIMESTAMP
+        do
+          echo "DIGEST $DIGEST has TAGS $TAGS and TIMESTAMP $TIMESTAMP"
+          TIMESTAMP_epoch=`date -d $(echo "$TIMESTAMP" | xargs) +%s`
+          imageTag=$(echo "$TAGS" | xargs)
+
+          # Compare the two timestamps
+          if ((TIMESTAMP_epoch < cutoff_date)); then
+            echo "The timestamp is older than ${retention_period} days. Deleting DIGEST: $DIGEST"
+            IFS=', ' ;for tag in $imageTag
+            do
+              echo "Tag: $tag"
+              gcloud container images untag "${image}:${tag}" --quiet
+            done
+            gcloud container images delete "${image}@sha256:${DIGEST}" --quiet
+          else
+            echo "The timestamp is NOT older than ${retention_period} days. DIGEST: $DIGEST"
+          fi
+        done
+    } < $filePath
+done
