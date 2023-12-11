@@ -47,7 +47,7 @@ dev_tag_pattern="${4:-}"
 images=$(get_images)
 
 # Cleanup untagged images older than a day
-untagged_images=$(get_images "-tags:*")
+untagged_images=$(get_images "--filter='-tags:*'")
 for image in $untagged_images; do
   delete_image "$image" "$(gcloud container images list-tags "$image" --format="get(digest)")"
 done
