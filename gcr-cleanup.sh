@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 
 # Variable initialization
@@ -10,17 +10,9 @@ images=`gcloud container images list --repository gcr.io/"$project" | grep -v NA
 cutoff_date=$(date -d "$retention_peiriod days ago" +%s)
 time_now=`date +%s`
 
-<<<<<<< HEAD
 # Temporary directory for log files
 folderPath="/tmp/gcrCleanup_${time_now}"
 mkdir -p "$folderPath"
-=======
-# Cleanup untagged images older than a day
-untagged_images=$(get_images "--filter='-tags:*'")
-for image in $untagged_images; do
-  delete_image "$image" "$(gcloud container images list-tags "$image" --format="get(digest)")"
-done
->>>>>>> refs/remotes/origin/main
 
 # Processing images
 for image in $images;
